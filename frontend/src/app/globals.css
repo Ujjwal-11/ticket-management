@@ -86,3 +86,33 @@ td {
   padding: 0.55rem;
   border-bottom: 1px solid #e7e5e4;
 }
+
+.field-invalid {
+  border-color: #9f1239;
+  border-width: 2px;
+}
+
+.queue-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  width: 100%;
+  margin-bottom: 0.5rem;
+}
+
+.queue-header h1 {
+  margin: 0;
+}
+
+.inline-actions {
+  display: flex;
+  gap: 0.25rem;
+  flex-wrap: nowrap;
+}
+
+button.icon-button {
+  min-width: 2rem;
+  padding: 0.35rem 0.5rem;
+}
