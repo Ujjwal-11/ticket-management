@@ -1,0 +1,390 @@
+openapi: 3.0.3
+info:
+  title: Support Ticket Management API
+  version: 1.0.0
+  description: >
+    Queue, ticket detail, field updates, strict status transitions, and comments.
+    Behavior is defined in specs/001-support-ticket-system/spec.md.
+servers:
+  - url: http://localhost:8080
+tags:
+  - name: tickets
+  - name: comments
+paths:
+  /api/v1/tickets:
+    get:
+      tags: [tickets]
+      operationId: listTickets
+      summary: List tickets, newest activity first
+      parameters:
+        - $ref: "#/components/parameters/Keyword"
+        - $ref: "#/components/parameters/StatusFilter"
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: One page of matching tickets. Page size is always 20.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TicketPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+    post:
+      tags: [tickets]
+      operationId: createTicket
+      summary: Create a ticket
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTicketRequest"
+      responses:
+        "201":
+          description: Ticket created with status OPEN.
+          headers:
+            Location:
+              schema:
+                type: string
+              description: Path of the new ticket, /api/v1/tickets/{id}.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ticket"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /api/v1/tickets/{id}:
+    get:
+      tags: [tickets]
+      operationId: getTicket
+      summary: Get one ticket and its comments
+      parameters:
+        - $ref: "#/components/parameters/TicketId"
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Ticket with comments oldest first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ticket"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      tags: [tickets]
+      operationId: updateTicket
+      summary: Update title, description, priority, or assignee
+      description: >
+        Does not change status. A present field replaces the stored value.
+        An omitted field stays as it is. assignee null or blank clears the assignee.
+        Rejected when the ticket is CLOSED.
+      parameters:
+        - $ref: "#/components/parameters/TicketId"
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTicketRequest"
+      responses:
+        "200":
+          description: Updated ticket.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ticket"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Closed"
+  /api/v1/tickets/{id}/transitions:
+    post:
+      tags: [tickets]
+      operationId: transitionTicket
+      summary: Move a ticket to an allowed next status
+      parameters:
+        - $ref: "#/components/parameters/TicketId"
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TransitionRequest"
+      responses:
+        "200":
+          description: Status updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ticket"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The requested status is not an allowed next status.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+              example:
+                type: about:blank
+                title: Conflict
+                status: 409
+                detail: Cannot change status from Open to Closed.
+                instance: /api/v1/tickets/1/transitions
+  /api/v1/tickets/{id}/comments:
+    post:
+      tags: [comments]
+      operationId: addComment
+      summary: Add a comment
+      description: Rejected when the ticket is CLOSED. Moves the ticket updatedAt forward.
+      parameters:
+        - $ref: "#/components/parameters/TicketId"
+        - $ref: "#/components/parameters/CorrelationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCommentRequest"
+      responses:
+        "201":
+          description: Comment stored.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Comment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Closed"
+components:
+  parameters:
+    TicketId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+    Keyword:
+      name: q
+      in: query
+      required: false
+      description: Case-insensitive substring of title or description. Blank means no keyword filter.
+      schema:
+        type: string
+    StatusFilter:
+      name: status
+      in: query
+      required: false
+      description: Omit to include every status.
+      schema:
+        $ref: "#/components/schemas/TicketStatus"
+    Page:
+      name: page
+      in: query
+      required: false
+      description: Zero-based page index. Size is fixed at 20.
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+    CorrelationId:
+      name: X-Correlation-Id
+      in: header
+      required: false
+      schema:
+        type: string
+  responses:
+    BadRequest:
+      description: Validation failed. Nothing from the attempt is stored.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+          example:
+            type: about:blank
+            title: Bad Request
+            status: 400
+            detail: Validation failed
+            instance: /api/v1/tickets
+            errors:
+              - field: title
+                message: Title is required
+    NotFound:
+      description: No ticket with that id.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+          example:
+            type: about:blank
+            title: Not Found
+            status: 404
+            detail: Ticket not found
+            instance: /api/v1/tickets/99
+    Closed:
+      description: The ticket is closed.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+          example:
+            type: about:blank
+            title: Conflict
+            status: 409
+            detail: Closed tickets cannot be changed. Reopen the ticket first.
+            instance: /api/v1/tickets/1
+  schemas:
+    TicketStatus:
+      type: string
+      enum: [OPEN, IN_PROGRESS, RESOLVED, CLOSED]
+    Priority:
+      type: string
+      enum: [LOW, MEDIUM, HIGH, URGENT]
+    TicketSummary:
+      type: object
+      required: [id, title, priority, status, createdAt, updatedAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+        title:
+          type: string
+        priority:
+          $ref: "#/components/schemas/Priority"
+        status:
+          $ref: "#/components/schemas/TicketStatus"
+        assignee:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    Comment:
+      type: object
+      required: [id, authorName, body, createdAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+        authorName:
+          type: string
+        body:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    Ticket:
+      allOf:
+        - $ref: "#/components/schemas/TicketSummary"
+        - type: object
+          required: [description, comments]
+          properties:
+            description:
+              type: string
+            comments:
+              type: array
+              items:
+                $ref: "#/components/schemas/Comment"
+    TicketPage:
+      type: object
+      required: [content, page, size, totalElements, totalPages]
+      properties:
+        content:
+          type: array
+          items:
+            $ref: "#/components/schemas/TicketSummary"
+        page:
+          type: integer
+          minimum: 0
+        size:
+          type: integer
+          enum: [20]
+        totalElements:
+          type: integer
+          minimum: 0
+        totalPages:
+          type: integer
+          minimum: 0
+    CreateTicketRequest:
+      type: object
+      required: [title, description]
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        priority:
+          $ref: "#/components/schemas/Priority"
+        assignee:
+          type: string
+          nullable: true
+    UpdateTicketRequest:
+      type: object
+      description: Every property is optional. Status is not accepted.
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        priority:
+          $ref: "#/components/schemas/Priority"
+        assignee:
+          type: string
+          nullable: true
+    TransitionRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          $ref: "#/components/schemas/TicketStatus"
+    CreateCommentRequest:
+      type: object
+      required: [authorName, body]
+      properties:
+        authorName:
+          type: string
+        body:
+          type: string
+    FieldError:
+      type: object
+      required: [field, message]
+      properties:
+        field:
+          type: string
+        message:
+          type: string
+    Problem:
+      type: object
+      required: [type, title, status, detail, instance]
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/FieldError"
